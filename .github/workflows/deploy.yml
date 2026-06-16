@@ -31,19 +31,42 @@ jobs:
           IMAGE_URI: 061836593621.dkr.ecr.eu-north-1.amazonaws.com/app-app14:${{ github.event.workflow_run.head_sha }}
           CLUSTER: postnord-tpl-cluster
           SERVICE: app-app14-dev
+          AWS_REGION: eu-north-1
         run: |
+          TASK_DEF_ARN=$(aws ecs describe-services \
+            --cluster "$CLUSTER" \
+            --services "$SERVICE" \
+            --region "$AWS_REGION" \
+            --query 'services[0].taskDefinition' \
+            --output text)
+
+          NEW_TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition "$TASK_DEF_ARN" \
+            --region "$AWS_REGION" \
+            --query 'taskDefinition' \
+            --output json | jq --arg IMAGE "$IMAGE_URI" \
+            'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
+             | .containerDefinitions[0].image = $IMAGE')
+
+          NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json "$NEW_TASK_DEF" \
+            --region "$AWS_REGION" \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
           aws ecs update-service \
             --cluster "$CLUSTER" \
             --service "$SERVICE" \
-            --force-new-deployment \
-            --region eu-north-1
+            --task-definition "$NEW_TASK_DEF_ARN" \
+            --region "$AWS_REGION"
 
       - name: Wait for deployment to stabilise
         env:
           CLUSTER: postnord-tpl-cluster
           SERVICE: app-app14-dev
+          AWS_REGION: eu-north-1
         run: |
           aws ecs wait services-stable \
             --cluster "$CLUSTER" \
             --services "$SERVICE" \
-            --region eu-north-1
+            --region "$AWS_REGION"
